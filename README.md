@@ -90,6 +90,17 @@ The same schemas through [`zod-to-kotlin`](https://github.com/sdgluck/zod-to-kot
 give the matching Kotlin; both are built on
 [`zod-native-ir`](https://github.com/sdgluck/zod-native-ir).
 
+## Install
+
+```sh
+pnpm add github:sdgluck/zod-to-swift#v0.1.1 github:sdgluck/zod-native-ir#v0.1.1
+```
+
+`zod-native-ir` is a peer dependency: the generator accepts and returns its
+types, so it and your code should share one copy. (Depending on it directly also
+keeps pnpm's `blockExoticSubdeps` — on by default since pnpm 11 — happy, since
+it refuses git dependencies of dependencies.)
+
 ## Requirements
 
 Node 22.18+ and zod 4. The generated code needs Swift 5.9+ (it uses `switch`
