@@ -83,7 +83,7 @@ default, describes the parsed value (it's required).
 | --- | --- |
 | `header` | comment lines for the top of the file |
 | `emitSupport` | also declare `JSONValue` and `AnyCodingKey`, which the output uses (default `true`; turn off if your module defines them) |
-| `itemName(root)` | name of the element type of a top-level array root (default `${root}Item`) |
+| `itemName(root, wrapper)` | name of the shape a top-level list, map or optional root wraps; `wrapper` is the one directly around it (default `${root}Item` for a list element, `${root}Value` otherwise) |
 | `afterNamespace(ns, refs)` | extra lines after each namespace's types; `refs` maps each root's name to its qualified Swift type — e.g. for emitting typed endpoint descriptors |
 
 The same schemas through [`zod-to-kotlin`](https://github.com/sdgluck/zod-to-kotlin)

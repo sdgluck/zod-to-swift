@@ -58,7 +58,30 @@ const RESERVED_TYPES = new Set([
 ]);
 
 /** Set per `generateSwift` call; the emitter is synchronous, so this can't interleave. */
-let itemName: (root: string) => string = (root) => `${root}Item`;
+let itemName: (root: string, wrapper: Wrapper) => string = defaultItemName;
+
+/** The wrappers a top-level root can put around the type it names. */
+export type Wrapper = "array" | "record" | "nullable";
+
+function defaultItemName(root: string, wrapper: Wrapper): string {
+  return wrapper === "array" ? `${root}Item` : `${root}Value`;
+}
+
+/**
+ * The named shape under any lists, maps and optionals, if there is one to
+ * name, and the wrapper directly around it — `[X]?` is a list of `X`.
+ */
+function wrapped(t: IRType, around?: Wrapper): { shape: IRType; around: Wrapper } | undefined {
+  if (t.k === "array" || t.k === "record" || t.k === "nullable") return wrapped(t.of, t.k);
+  if (!around || (t.k !== "object" && t.k !== "enum" && t.k !== "union")) return undefined;
+  return { shape: t, around };
+}
+
+/** `t` with its innermost shape replaced, keeping every wrapper around it. */
+function rewrap(t: IRType, inner: IRType): IRType {
+  if (t.k === "array" || t.k === "record" || t.k === "nullable") return { ...t, of: rewrap(t.of, inner) };
+  return inner;
+}
 
 const ident = (name: string) => (KEYWORDS.has(name) ? `\`${name}\`` : name);
 
@@ -136,16 +159,19 @@ function declare(name: string, t: IRType, out: Out): void {
   if (t.k === "object") return struct(name, t.props, out);
   if (t.k === "enum") return stringEnum(name, t.values, out);
   if (t.k === "union") return union(name, t, out);
-  // A top-level output that is a list or a scalar: name its element if it
-  // needs one, and alias the rest.
-  if (t.k === "array" && (t.of.k === "object" || t.of.k === "enum" || t.of.k === "union")) {
-    const item = itemName(name);
-    declare(item, t.of, out);
-    out.line(`public typealias ${name} = [${item}]`);
-    return;
+  // A top-level root that wraps a shape (a list, a map, an optional): the
+  // shape gets a name of its own beside the alias. Naming it from the root
+  // instead collides with the alias itself, and the collision is resolved by
+  // prefixing — `RunDetailOutputRunDetailOutput`.
+  const inner = wrapped(t);
+  let alias: IRType = t;
+  if (inner) {
+    const item = itemName(name, inner.around);
+    declare(item, inner.shape, out);
+    alias = rewrap(t, { k: "ref", name: item });
   }
   const ctx: Ctx = { out, taken: new Set(), parent: name };
-  out.line(`public typealias ${name} = ${typeRef(t, ctx, name)}`);
+  out.line(`public typealias ${name} = ${typeRef(alias, ctx, name)}`);
 }
 
 function struct(name: string, props: Array<{ key: string; optional: boolean; t: IRType }>, out: Out): void {
@@ -313,8 +339,13 @@ export interface SwiftOptions {
    * already defines them. Default true.
    */
   emitSupport?: boolean;
-  /** The element type of a top-level array root. Default `${root}Item`. */
-  itemName?: (root: string) => string;
+  /**
+   * The name of the shape a top-level root wraps: the element of a list, the
+   * value of a map, the object behind an optional. `wrapper` is the one
+   * directly around the shape. Default `${root}Item` for a list element and
+   * `${root}Value` otherwise.
+   */
+  itemName?: (root: string, wrapper: Wrapper) => string;
   /**
    * Extra lines after a namespace's types — e.g. endpoint descriptors that
    * refer to them. `refs` maps each root's name to its qualified Swift type.
@@ -371,7 +402,7 @@ public struct AnyCodingKey: CodingKey, Hashable, Sendable {
  */
 export function generateSwift(types: NamedSchema[] | IRDocument, options: SwiftOptions = {}): string {
   const doc = Array.isArray(types) ? collect(types) : types;
-  itemName = options.itemName ?? ((root) => `${root}Item`);
+  itemName = options.itemName ?? defaultItemName;
   const out = new Out();
   for (const line of options.header ?? []) out.line(`// ${line}`);
   if (options.header?.length) out.line();

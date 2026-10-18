@@ -84,6 +84,18 @@ describe("naming and layout", () => {
     assert.match(swift(list, { itemName: () => "Film" }), /public typealias Root = \[Film\]/);
   });
 
+  test("an optional or map root names the shape it wraps once, not after itself twice", () => {
+    const shape = z.object({ title: z.string() });
+    const optional = swift(shape.nullable());
+    assert.match(optional, /public struct RootValue: /);
+    assert.match(optional, /public typealias Root = RootValue\?/);
+    assert.doesNotMatch(optional, /RootRoot/);
+    assert.match(swift(z.record(z.string(), shape)), /public typealias Root = \[String: RootValue\]/);
+    assert.match(swift(z.array(shape).nullable()), /public typealias Root = \[RootItem\]\?/);
+    const named = swift(shape.nullable(), { itemName: (root, wrapper) => `${root}${wrapper === "nullable" ? "Detail" : "Item"}` });
+    assert.match(named, /public typealias Root = RootDetail\?/);
+  });
+
   test("dotted and keyword keys get Swift names and keep their wire key", () => {
     const s = swift(z.object({ "tab.match": z.boolean(), default: z.boolean() }));
     assert.match(s, /case tabMatch = "tab\.match"/);

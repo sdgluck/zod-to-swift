@@ -41,7 +41,27 @@ const RESERVED_TYPES = new Set([
     "JSONValue",
 ]);
 /** Set per `generateSwift` call; the emitter is synchronous, so this can't interleave. */
-let itemName = (root) => `${root}Item`;
+let itemName = defaultItemName;
+function defaultItemName(root, wrapper) {
+    return wrapper === "array" ? `${root}Item` : `${root}Value`;
+}
+/**
+ * The named shape under any lists, maps and optionals, if there is one to
+ * name, and the wrapper directly around it — `[X]?` is a list of `X`.
+ */
+function wrapped(t, around) {
+    if (t.k === "array" || t.k === "record" || t.k === "nullable")
+        return wrapped(t.of, t.k);
+    if (!around || (t.k !== "object" && t.k !== "enum" && t.k !== "union"))
+        return undefined;
+    return { shape: t, around };
+}
+/** `t` with its innermost shape replaced, keeping every wrapper around it. */
+function rewrap(t, inner) {
+    if (t.k === "array" || t.k === "record" || t.k === "nullable")
+        return { ...t, of: rewrap(t.of, inner) };
+    return inner;
+}
 const ident = (name) => (KEYWORDS.has(name) ? `\`${name}\`` : name);
 class Out {
     lines = [];
@@ -111,16 +131,19 @@ function declare(name, t, out) {
         return stringEnum(name, t.values, out);
     if (t.k === "union")
         return union(name, t, out);
-    // A top-level output that is a list or a scalar: name its element if it
-    // needs one, and alias the rest.
-    if (t.k === "array" && (t.of.k === "object" || t.of.k === "enum" || t.of.k === "union")) {
-        const item = itemName(name);
-        declare(item, t.of, out);
-        out.line(`public typealias ${name} = [${item}]`);
-        return;
+    // A top-level root that wraps a shape (a list, a map, an optional): the
+    // shape gets a name of its own beside the alias. Naming it from the root
+    // instead collides with the alias itself, and the collision is resolved by
+    // prefixing — `RunDetailOutputRunDetailOutput`.
+    const inner = wrapped(t);
+    let alias = t;
+    if (inner) {
+        const item = itemName(name, inner.around);
+        declare(item, inner.shape, out);
+        alias = rewrap(t, { k: "ref", name: item });
     }
     const ctx = { out, taken: new Set(), parent: name };
-    out.line(`public typealias ${name} = ${typeRef(t, ctx, name)}`);
+    out.line(`public typealias ${name} = ${typeRef(alias, ctx, name)}`);
 }
 function struct(name, props, out) {
     out.line(`public struct ${name}: Codable, Sendable, Hashable {`);
@@ -324,7 +347,7 @@ public struct AnyCodingKey: CodingKey, Hashable, Sendable {
  */
 export function generateSwift(types, options = {}) {
     const doc = Array.isArray(types) ? collect(types) : types;
-    itemName = options.itemName ?? ((root) => `${root}Item`);
+    itemName = options.itemName ?? defaultItemName;
     const out = new Out();
     for (const line of options.header ?? [])
         out.line(`// ${line}`);
